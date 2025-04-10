@@ -1,33 +1,56 @@
 # Create an Application instance with Kafka configs
 from quixstreams import Application
+from loguru import logger
 
-# application handles all low level details to connect to kafka
-app = Application(
-    broker_address='localhost:31234', consumer_group='trades'
-)
+from kraken_api import KrakenAPI, Trade
 
-# Define a topic "my_topic" with JSON serialization, create connection to kafka topic and creates it if it doesn't exist
-topic = app.topic(name='my_topic', value_serializer='json')
+def run(
+    kafka_broker_address: str,
+    kafka_topic_name: str,
+    kraken_api: KrakenAPI,
+):
+    app = Application(
+        broker_address=kafka_broker_address,
+    )
 
-event = {"id": "1", "text": "Lorem ipsum dolor sit amet"}
+    # Define a topic "my_topic" with JSON serialization
+    topic = app.topic(name=kafka_topic_name, value_serializer='json')
 
-# Create a Producer instance, object that pushes messages to kafka
-with app.get_producer() as producer:
 
-    while True:
+    # Create a Producer instance
+    with app.get_producer() as producer:
 
-        # 1) fetch data from external api
-        event = {"id": "1", "text": "Lorem ipsum dolor sit amet"}
+        while True:
 
-        # 2)Serialize an event using the defined Topic,  must serialize event since kafka is a binary protocol
-        message = topic.serialize(key=event["id"], value=event)
+            # 1. Fetch the event from the external API uses a type hint to get the correct return type
+            events: list[Trade] = kraken_api.get_trades()
+            # event = {"id": "1", "text": "Lorem ipsum dolor sit amet"}
 
-        # 3) Produce a message into the Kafka topic, push message to kafka
-        producer.produce(
-            topic=topic.name, 
-            value=message.value, 
-            key=message.key # important when having modular systems
-        )
+            for event in events:
+                # 2. Serialize an event using the defined Topic 
+                message = topic.serialize(
+                    # key=event["id"],
+                    value=event.to_dict()
+                )
 
-        import time
-        time.sleep(1)
+                # 3. Produce a message into the Kafka topic
+                producer.produce(
+                    topic=topic.name,
+                    value=message.value,
+                    # key=message.key
+                )
+
+                logger.info(f"""Produced message to topic {topic.name} Trade: {message.value}""")
+
+            # breakpoint()
+
+if __name__ == "__main__":
+
+    # create object that can talk to the Kraken API and get us the trade data in real time
+    api = KrakenAPI(product_ids=['XRP/USD'])
+    
+    run(
+        kafka_broker_address='localhost:31234',
+        kafka_topic_name='trades',
+        kraken_api=api,
+    )
