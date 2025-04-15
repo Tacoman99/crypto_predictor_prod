@@ -30,5 +30,6 @@ deploy-for-prod:
 	kubectl delete -f deployments/prod/${service}/${service}.yaml --ignore-not-found=true
 	kubectl apply -f deployments/prod/${service}/${service}.yaml
 
+# check and fix linting errors
 lint:
 	ruff check . --fix
