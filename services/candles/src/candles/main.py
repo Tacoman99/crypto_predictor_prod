@@ -144,7 +144,7 @@ def run(
 
 
 if __name__ == '__main__':
-    from config import config
+    from candles.config import config
 
     run(
         kafka_broker_address=config.kafka_broker_address,
