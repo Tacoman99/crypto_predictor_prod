@@ -4,20 +4,20 @@
 
 # Runs the trades service as a standalone Pyton app (not Dockerized)
 dev:
-	uv run services/trades/src/trades/main.py
+	uv run services/${service}/src/${service}/main.py
 
 # Builds a docker image from a given Dockerfile
 build-for-dev:
-	docker build -t trades:dev -f docker/trades.Dockerfile .
+	docker build -t ${service}:dev -f docker/${service}.Dockerfile .
 
 # Push the docker image to the docker registry of our kind cluster
 push-for-dev:
-	kind load docker-image trades:dev --name rwml-34fa
+	kind load docker-image ${service}:dev --name rwml-34fa
 
 # Deploys the docker image to the kind cluster
 deploy-for-dev: build-for-dev push-for-dev
-	kubectl delete -f deployment/yamls/trades.yaml --ignore-not-found=true
-	kubectl apply -f deployment/yamls/trades.yaml
+	kubectl delete -f deployment/dev/yamls/${service}.yaml --ignore-not-found=true
+	kubectl apply -f deployment/dev/yamls/${service}.yaml
 
 ################################################################################
 ## Production
