@@ -23,3 +23,9 @@ spec:
           value: kafka-e11b-kafka-bootstrap.kafka.svc.cluster.local:9092
         - name: KAFKA_TOPIC
           value: "trades"
+        volumeMounts:
+        - mountPath: /app/state
+          name: state-store
+      volumes:
+      - name: state-store
+        emptyDir: {}
