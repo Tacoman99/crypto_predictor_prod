@@ -22,10 +22,8 @@ class KrakenWebsocketAPI:
         self._subscribe(product_ids)
 
     def get_trades(self) -> list[Trade]:
-        # receive a message from the websocket
         data: str = self._ws_client.recv()
 
-        # if the message is a heartbeat, return an empty list
         if 'heartbeat' in data:
             logger.info('Heartbeat received')
             return []
@@ -59,7 +57,7 @@ class KrakenWebsocketAPI:
         # Method 2 to create a list of trades
         # Using list comprehension (this is faster)
         trades = [
-            Trade(
+            Trade.from_kraken_websocket_response(
                 product_id=trade['symbol'],
                 price=trade['price'],
                 quantity=trade['qty'],
@@ -94,3 +92,9 @@ class KrakenWebsocketAPI:
         for _ in product_ids:
             _ = self._ws_client.recv()
             _ = self._ws_client.recv()
+
+    def is_done(self) -> bool:
+        """
+        Returns True if the websocket is done, False otherwise.
+        """
+        return False
