@@ -1,3 +1,5 @@
+from candle import update_candles_state
+from indicators import compute_technical_indicators
 from loguru import logger
 from quixstreams import Application
 
@@ -33,7 +35,6 @@ def run(
         broker_address=kafka_broker_address,
         consumer_group=kafka_consumer_group,
     )
-
     # input topic
     candles_topic = app.topic(kafka_input_topic, value_deserializer='json')
     # output topic
@@ -43,16 +44,20 @@ def run(
     # Create a Streaming DataFrame connected to the input Kafka topic
     sdf = app.dataframe(topic=candles_topic)
 
-    # Keep only the candles for the given `candle_seconds`
+    # Step 2: Keep only the candles for the given `candle_seconds`
     sdf = sdf[sdf['candle_seconds'] == candle_seconds]
 
-    # Step 2. Compute technical indicators from candles
-    # TODO: data processsing here
+    # Step 3. Add candles to state dictionary
+
+    sdf = sdf.apply(update_candles_state, stateful=True)
+    # Step 4. Compute technical indicators
+
+    sdf = sdf.apply(compute_technical_indicators, stateful=True)
 
     # logging on the console
     sdf = sdf.update(lambda value: logger.debug(f'Final message: {value}'))
 
-    # Step 3. Produce the candles to the output kafka topic
+    # Step 5. Produce the candles to the output kafka topic
     sdf = sdf.to_topic(technical_indicators_topic)
 
     # Starts the streaming app
@@ -60,7 +65,7 @@ def run(
 
 
 if __name__ == '__main__':
-    from technical_indicators.config import config
+    from config import config
 
     # breakpoint()
     run(
