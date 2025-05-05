@@ -3,7 +3,6 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: trades
-  namespace: rwml
   labels:
     app: trades
 spec:
@@ -18,16 +17,14 @@ spec:
     spec:
       containers:
       - name: trades
-        image: ghcr.io/tacoman99/trades:0.1.5-beta.
+        image: ghcr.io/tacoman99/trades:0.1.5-beta.1746468463
         imagePullPolicy: Always
         #
         env:
         - name: KAFKA_BROKER_ADDRESS
-          value: kafka-c6c8-kafka-bootstrap.strimzi.svc.cluster.local:9092
+          value: kafka-e11b-kafka-bootstrap.kafka.svc.cluster.local:9092
         - name: KAFKA_TOPIC
           value: "trades"
-        - name: DATA_SOURCE
-          value: "live"
         #
         resources:
           requests:
@@ -36,3 +33,5 @@ spec:
           limits:
             cpu: 1000m
             memory: 512Mi
+      imagePullSecrets:
+        - name: ghcr-secret
