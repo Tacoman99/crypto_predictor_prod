@@ -233,6 +233,9 @@ def train(
         mlflow.log_metric('test_mae_baseline', test_mae_baseline)
         logger.info(f'Test MAE for Baseline model: {test_mae_baseline:.4f}')
 
+        # Step 8. Train N models to get a sense which would be the best model
+        # to use for hyperparameter tuning
+
 
 if __name__ == '__main__':
     train(
