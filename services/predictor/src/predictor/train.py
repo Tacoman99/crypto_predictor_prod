@@ -14,8 +14,6 @@ Has the following steps:
 10. Hyperparameter tuning
 """
 
-from typing import Optional
-
 import mlflow
 import pandas as pd
 from loguru import logger
@@ -134,8 +132,9 @@ def train(
     candle_seconds: int,
     prediction_horizon_seconds: int,
     train_test_split_ratio: float,
-    n_rows_for_data_profiling: Optional[int] = None,
-    eda_report_html_path: Optional[str] = './eda_report.html',
+    n_rows_for_data_profiling: int,
+    eda_report_html_path: str,
+    features: list[str],
 ):
     """
     Trains a predictor for the given pair and data, and if the model is good, it pushes
@@ -147,7 +146,18 @@ def train(
     mlflow.set_tracking_uri(mlflow_tracking_uri)
 
     logger.info('Setting up MLflow experiment')
+    # Set our tracking server uri for logging
+    import os
+
     from predictor.names import get_experiment_name
+
+    os.environ['MLFLOW_TRACKING_USERNAME'] = 'user'
+    os.environ['MLFLOW_TRACKING_PASSWORD'] = '6440921D-2493-42AA-BE40-428CD753D81D'
+    mlflow.set_tracking_uri('http://localhost:8889')
+
+    # logging credentials
+    logger.debug(os.environ['MLFLOW_TRACKING_USERNAME'])
+    logger.debug(os.environ['MLFLOW_TRACKING_PASSWORD'])
 
     mlflow.set_experiment(
         get_experiment_name(pair, candle_seconds, prediction_horizon_seconds)
@@ -162,6 +172,15 @@ def train(
     with mlflow.start_run():
         logger.info('Starting MLflow run')
 
+        # Input to the training process
+        mlflow.log_param('features', features)
+        mlflow.log_param('pair', pair)
+        mlflow.log_param('days_in_past', days_in_past)
+        mlflow.log_param('candle_seconds', candle_seconds)
+        mlflow.log_param('prediction_horizon_seconds', prediction_horizon_seconds)
+        mlflow.log_param('train_test_split_ratio', train_test_split_ratio)
+        mlflow.log_param('n_rows_for_data_profiling', n_rows_for_data_profiling)
+
         # Step 1. Load technical indicators data from RisingWave
         ts_data = load_ts_data_from_risingwave(
             host=risingwave_host,
@@ -173,11 +192,14 @@ def train(
             days_in_past=days_in_past,
             candle_seconds=candle_seconds,
         )
+        # keep only the `features`
+        ts_data = ts_data[features]
 
         # Step 2. Add target column
         ts_data['target'] = ts_data['close'].shift(
             -prediction_horizon_seconds // candle_seconds
         )
+
         # drop rows for which the target is NaN
         ts_data = ts_data.dropna(subset=['target'])
 
@@ -233,13 +255,23 @@ def train(
         mlflow.log_metric('test_mae_baseline', test_mae_baseline)
         logger.info(f'Test MAE for Baseline model: {test_mae_baseline:.4f}')
 
-        # Step 8. Train N models to get a sense which would be the best model
-        # to use for hyperparameter tuning
+        # Step 8. Train a set of N models to get a sense what model will work best for the problem.
+        # We use lazypredict, which uses default hyperparameters for each model.
+        from predictor.models import generate_lazypredict_model_table
+
+        model_scores: pd.DataFrame = generate_lazypredict_model_table(
+            X_train, y_train, X_test, y_test
+        )
+        mlflow.log_table(model_scores, 'model_scores_with_default_hyperparameters.json')
+        logger.info(model_scores.to_string())
+
+        # Step 9. Pick the best model from `model_scores` and train it with the best hyperparameters.
+        # TODO: Implement this.
 
 
 if __name__ == '__main__':
     train(
-        mlflow_tracking_uri='http://localhost:8283',
+        mlflow_tracking_uri='http://localhost:8889',
         risingwave_host='localhost',
         risingwave_port=4567,
         risingwave_user='root',
@@ -250,6 +282,30 @@ if __name__ == '__main__':
         candle_seconds=60,
         prediction_horizon_seconds=300,
         train_test_split_ratio=0.8,
-        n_rows_for_data_profiling=100,
+        n_rows_for_data_profiling=1,  # TODO: set to 1 to speed up development
         eda_report_html_path='./eda_report.html',
+        features=[
+            'open',
+            'high',
+            'low',
+            'close',
+            'window_start_ms',
+            'volume',
+            'sma_7',
+            'sma_14',
+            'sma_21',
+            'sma_60',
+            'ema_7',
+            'ema_14',
+            'ema_21',
+            'ema_60',
+            'rsi_7',
+            'rsi_14',
+            'rsi_21',
+            'rsi_60',
+            'macd_7',
+            'macdsignal_7',
+            'macdhist_7',
+            'obv',
+        ],
     )
