@@ -135,6 +135,8 @@ def train(
     n_rows_for_data_profiling: int,
     eda_report_html_path: str,
     features: list[str],
+    number_of_trials: int,
+    number_of_folds: int,
 ):
     """
     Trains a predictor for the given pair and data, and if the model is good, it pushes
@@ -266,7 +268,16 @@ def train(
         logger.info(model_scores.to_string())
 
         # Step 9. Pick the best model from `model_scores` and train it with the best hyperparameters.
-        # TODO: Implement this.
+        from predictor.models import HuberRegressionModel_hyperparameter_tuning
+
+        model = HuberRegressionModel_hyperparameter_tuning()
+        model.fit(X_train, y_train, number_of_trials, number_of_folds)
+
+        # Step 10. Validate the final model
+        y_pred = model.predict(X_test)
+        test_mae_final = mean_absolute_error(y_test, y_pred)
+        mlflow.log_metric('test_mae_final', test_mae_final)
+        logger.info(f'Test MAE for final model: {test_mae_final:.4f}')
 
 
 if __name__ == '__main__':
@@ -308,4 +319,6 @@ if __name__ == '__main__':
             'macdhist_7',
             'obv',
         ],
+        number_of_trials=10,
+        number_of_folds=5,
     )
