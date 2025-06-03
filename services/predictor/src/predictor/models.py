@@ -149,24 +149,21 @@ class HuberRegressionModel_hyperparameter_tuning:
                     y_train.iloc[val_index],
                 )
 
-            # preprocessing the data
+                # preprocessing the data
+                pipeline = Pipeline(
+                    [
+                        ('imputer', SimpleImputer(strategy='mean')),
+                        ('scaler', StandardScaler()),
+                        ('model', HuberRegressor(**params)),
+                    ]
+                )
 
-            # use standard scaler to scale the data and drop null values
-            # drop null values
-            pipeline = Pipeline(
-                [
-                    ('imputer', SimpleImputer(strategy='mean')),
-                    ('scaler', StandardScaler()),
-                    ('model', HuberRegressor(**params)),
-                ]
-            )
+                # training the model on training fold
+                pipeline.fit(X_train_fold, y_train_fold)
 
-            # training the model on training fold
-            pipeline.fit(X_train_fold, y_train_fold)
-
-            # evaluating the model on validation fold
-            y_pred = pipeline.predict(X_val_fold)
-            mae_scores.append(mean_absolute_error(y_val_fold, y_pred))
+                # evaluating the model on validation fold
+                y_pred = pipeline.predict(X_val_fold)
+                mae_scores.append(mean_absolute_error(y_val_fold, y_pred))
 
             # returning the mean of the mae scores
             return np.mean(mae_scores)
