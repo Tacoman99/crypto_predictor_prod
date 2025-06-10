@@ -14,10 +14,21 @@ Has the following steps:
 10. Hyperparameter tuning
 """
 
+from typing import Optional
+
 import mlflow
 import pandas as pd
 from loguru import logger
 from risingwave import OutputFormat, RisingWave, RisingWaveConnOptions
+from sklearn.metrics import mean_absolute_error
+
+from predictor.data_validation import validate_data
+from predictor.model_registry import get_model_name, push_model
+from predictor.models import (
+    BaselineModel,
+    get_model_candidates,
+    get_model_obj,
+)
 
 
 def generate_exploratory_data_analysis_report(
@@ -40,40 +51,15 @@ def generate_exploratory_data_analysis_report(
     profile.to_file(output_html_path)
 
 
-def validate_data(ts_data: pd.DataFrame):
-    """
-    Runs a battery of validation checks on the data.
-    If any of the checks fail, it raises an exception, so the training process can be aborted.
-    This way we ensure no model trained on bad data is pushed to the model registry.
-    """
-    import great_expectations as ge
-
-    ge_df = ge.from_pandas(ts_data)
-
-    validation_result = ge_df.expect_column_values_to_be_between(
-        column='close',
-        min_value=0,
-    )
-
-    if not validation_result.success:
-        raise Exception('Column "close" has values less than 0')
-
-    # TODO: Add more validation checks
-    # For example:
-    # - Check for null values
-    # - Check for duplicates
-    # - Check the data is sorted by timestamp
-    # - ...
-
-
 def load_ts_data_from_risingwave(
     host: str,
     port: int,
     user: str,
     password: str,
     database: str,
+    table: str,
     pair: str,
-    days_in_past: int,
+    training_data_horizon_days: int,
     candle_seconds: int,
 ) -> pd.DataFrame:
     """
@@ -86,7 +72,7 @@ def load_ts_data_from_risingwave(
         password: str: The password to connect to RisingWave.
         database: str: The database to connect to RisingWave.
         pair: str: The trading pair to fetch data for.
-        days_in_past: int: The number of days in the past to fetch data for.
+        training_data_horizon_days: int: The number of days in the past to fetch data for.
         candle_seconds: int: The candle duration in seconds.
 
     Returns:
@@ -102,11 +88,11 @@ def load_ts_data_from_risingwave(
     select
         *
     from
-        public.technical_indicators
+        {table}
     where
         pair='{pair}'
         and candle_seconds='{candle_seconds}'
-        and to_timestamp(window_start_ms / 1000) > now() - interval '{days_in_past} days'
+        and to_timestamp(window_start_ms / 1000) > now() - interval '{training_data_horizon_days} days'
     order by
         window_start_ms;
     """
@@ -114,7 +100,7 @@ def load_ts_data_from_risingwave(
     ts_data = rw.fetch(query, format=OutputFormat.DATAFRAME)
 
     logger.info(
-        f'Fetched {len(ts_data)} rows of data for {pair} in the last {days_in_past} days'
+        f'Fetched {len(ts_data)} rows of data for {pair} in the last {training_data_horizon_days} days'
     )
 
     return ts_data
@@ -127,16 +113,20 @@ def train(
     risingwave_user: str,
     risingwave_password: str,
     risingwave_database: str,
+    risingwave_table: str,
     pair: str,
-    days_in_past: int,
+    training_data_horizon_days: int,
     candle_seconds: int,
     prediction_horizon_seconds: int,
     train_test_split_ratio: float,
-    n_rows_for_data_profiling: int,
+    max_percentage_rows_with_missing_values: float,
+    data_profiling_n_rows: int,
     eda_report_html_path: str,
     features: list[str],
-    number_of_trials: int,
-    number_of_folds: int,
+    hyperparam_search_trials: int,
+    model_name: Optional[str] = None,
+    n_model_candidates: Optional[int] = 1,
+    max_percentage_diff_mae_wrt_baseline: Optional[float] = 0.10,
 ):
     """
     Trains a predictor for the given pair and data, and if the model is good, it pushes
@@ -148,18 +138,9 @@ def train(
     mlflow.set_tracking_uri(mlflow_tracking_uri)
 
     logger.info('Setting up MLflow experiment')
-    # Set our tracking server uri for logging
-    import os
-
     from predictor.names import get_experiment_name
 
-    os.environ['MLFLOW_TRACKING_USERNAME'] = 'user'
-    os.environ['MLFLOW_TRACKING_PASSWORD'] = '6440921D-2493-42AA-BE40-428CD753D81D'
-    mlflow.set_tracking_uri('http://localhost:8889')
-
-    # logging credentials
-    logger.debug(os.environ['MLFLOW_TRACKING_USERNAME'])
-    logger.debug(os.environ['MLFLOW_TRACKING_PASSWORD'])
+    breakpoint()
 
     mlflow.set_experiment(
         get_experiment_name(pair, candle_seconds, prediction_horizon_seconds)
@@ -177,11 +158,16 @@ def train(
         # Input to the training process
         mlflow.log_param('features', features)
         mlflow.log_param('pair', pair)
-        mlflow.log_param('days_in_past', days_in_past)
+        mlflow.log_param('training_data_horizon_days', training_data_horizon_days)
         mlflow.log_param('candle_seconds', candle_seconds)
         mlflow.log_param('prediction_horizon_seconds', prediction_horizon_seconds)
         mlflow.log_param('train_test_split_ratio', train_test_split_ratio)
-        mlflow.log_param('n_rows_for_data_profiling', n_rows_for_data_profiling)
+        mlflow.log_param('data_profiling_n_rows', data_profiling_n_rows)
+        if model_name:
+            mlflow.log_param('model_name', model_name)
+        mlflow.log_param(
+            'max_percentage_diff_mae_wrt_baseline', max_percentage_diff_mae_wrt_baseline
+        )
 
         # Step 1. Load technical indicators data from RisingWave
         ts_data = load_ts_data_from_risingwave(
@@ -190,8 +176,9 @@ def train(
             user=risingwave_user,
             password=risingwave_password,
             database=risingwave_database,
+            table=risingwave_table,
             pair=pair,
-            days_in_past=days_in_past,
+            training_data_horizon_days=training_data_horizon_days,
             candle_seconds=candle_seconds,
         )
         # keep only the `features`
@@ -202,9 +189,6 @@ def train(
             -prediction_horizon_seconds // candle_seconds
         )
 
-        # drop rows for which the target is NaN
-        ts_data = ts_data.dropna(subset=['target'])
-
         # log the data to MLflow
         dataset = mlflow.data.from_pandas(ts_data)
         mlflow.log_input(dataset, context='training')
@@ -213,14 +197,18 @@ def train(
         mlflow.log_param('ts_data_shape', ts_data.shape)
 
         # Step 3. Validate the data
-        validate_data(ts_data)
+        ts_data = validate_data(ts_data, max_percentage_rows_with_missing_values)
+
+        # Homework:
+        # Plot data drift of the current data vs the data used by the model in the model registry.
+        from predictor.data_validation import generate_data_drift_report
+
+        generate_data_drift_report(ts_data, model_name)
 
         # Step 4. Profile the data
         # after the break
         ts_data_to_profile = (
-            ts_data.head(n_rows_for_data_profiling)
-            if n_rows_for_data_profiling
-            else ts_data
+            ts_data.head(data_profiling_n_rows) if data_profiling_n_rows else ts_data
         )
         generate_exploratory_data_analysis_report(
             ts_data_to_profile, output_html_path=eda_report_html_path
@@ -246,79 +234,78 @@ def train(
         mlflow.log_param('y_test_shape', y_test.shape)
 
         # Step 7. Build a dummy baseline model
-        from predictor.models import BaselineModel
-
-        model = BaselineModel()
-        y_pred = model.predict(X_test)
-
-        from sklearn.metrics import mean_absolute_error
-
+        baseline_model = BaselineModel()
+        y_pred = baseline_model.predict(X_test)
         test_mae_baseline = mean_absolute_error(y_test, y_pred)
         mlflow.log_metric('test_mae_baseline', test_mae_baseline)
         logger.info(f'Test MAE for Baseline model: {test_mae_baseline:.4f}')
 
-        # Step 8. Train a set of N models to get a sense what model will work best for the problem.
-        # We use lazypredict, which uses default hyperparameters for each model.
-        from predictor.models import generate_lazypredict_model_table
+        # Step 8. Find the best candidate model, if `model_name` is not provided.
+        if model_name is None:
+            # We fit N models with default hyperparameters for the given
+            # (X_train, y_train), and evaluate them with (X_test, y_test)
+            # to find the best `n_model_candidates` models
+            model_names = get_model_candidates(
+                X_train, y_train, X_test, y_test, n_candidates=n_model_candidates
+            )
 
-        model_scores: pd.DataFrame = generate_lazypredict_model_table(
-            X_train, y_train, X_test, y_test
-        )
-        mlflow.log_table(model_scores, 'model_scores_with_default_hyperparameters.json')
-        logger.info(model_scores.to_string())
+            # TODO: this is a hack that works when we have only one candidate model
+            # How would you modify this code to use a list of candiate models, and adjust
+            # their hyperparameters in the next step?
+            model_name = model_names[0]
 
-        # Step 9. Pick the best model from `model_scores` and train it with the best hyperparameters.
-        from predictor.models import HuberRegressionModel_hyperparameter_tuning
+        model = get_model_obj(model_name)
 
-        model = HuberRegressionModel_hyperparameter_tuning()
-        model.fit(X_train, y_train, number_of_trials, number_of_folds)
+        # Step 9. Train the choosen model with hyperparameter search.
+        logger.info(f'Start training model {model} with hyperparameter search')
+        model.fit(X_train, y_train, hyperparam_search_trials=hyperparam_search_trials)
 
-        # Step 10. Validate the final model
+        # Step 10. Validate the model
         y_pred = model.predict(X_test)
-        test_mae_final = mean_absolute_error(y_test, y_pred)
-        mlflow.log_metric('test_mae_final', test_mae_final)
-        logger.info(f'Test MAE for final model: {test_mae_final:.4f}')
+        test_mae = mean_absolute_error(y_test, y_pred)
+        mlflow.log_metric('test_mae', test_mae)
+        logger.info(f'Test MAE for model {model}: {test_mae:.4f}')
+
+        # Step 11. Push the model to the model registry
+        mae_diff = (test_mae - test_mae_baseline) / test_mae_baseline
+        if mae_diff <= max_percentage_diff_mae_wrt_baseline:
+            logger.info(
+                f'Model MAE is {mae_diff:.4f} < {max_percentage_diff_mae_wrt_baseline}'
+            )
+            logger.info('Pushing model to the registry')
+            model_name = get_model_name(
+                pair, candle_seconds, prediction_horizon_seconds
+            )
+            push_model(model, X_test, model_name)
+        else:
+            logger.info(
+                f'The model {model_name} MAE is {mae_diff:.4f} > {max_percentage_diff_mae_wrt_baseline}'
+            )
+            logger.info('Model NOT PUSHED to the registry')
 
 
 if __name__ == '__main__':
+    from predictor.config import training_config as config
+
     train(
-        mlflow_tracking_uri='http://localhost:8889',
-        risingwave_host='localhost',
-        risingwave_port=4567,
-        risingwave_user='root',
-        risingwave_password='',
-        risingwave_database='dev',
-        pair='BTC/USD',
-        days_in_past=10,  # TODO: give a better name to this, for example training_data_horizon_days
-        candle_seconds=60,
-        prediction_horizon_seconds=300,
-        train_test_split_ratio=0.8,
-        n_rows_for_data_profiling=1,  # TODO: set to 1 to speed up development
-        eda_report_html_path='./eda_report.html',
-        features=[
-            'open',
-            'high',
-            'low',
-            'close',
-            'window_start_ms',
-            'volume',
-            'sma_7',
-            'sma_14',
-            'sma_21',
-            'sma_60',
-            'ema_7',
-            'ema_14',
-            'ema_21',
-            'ema_60',
-            'rsi_7',
-            'rsi_14',
-            'rsi_21',
-            'rsi_60',
-            'macd_7',
-            'macdsignal_7',
-            'macdhist_7',
-            'obv',
-        ],
-        number_of_trials=10,
-        number_of_folds=5,
+        mlflow_tracking_uri=config.mlflow_tracking_uri,
+        risingwave_host=config.risingwave_host,
+        risingwave_port=config.risingwave_port,
+        risingwave_user=config.risingwave_user,
+        risingwave_password=config.risingwave_password,
+        risingwave_database=config.risingwave_database,
+        risingwave_table=config.risingwave_table,
+        pair=config.pair,
+        training_data_horizon_days=config.training_data_horizon_days,
+        candle_seconds=config.candle_seconds,
+        prediction_horizon_seconds=config.prediction_horizon_seconds,
+        train_test_split_ratio=config.train_test_split_ratio,
+        max_percentage_rows_with_missing_values=config.max_percentage_rows_with_missing_values,
+        data_profiling_n_rows=config.data_profiling_n_rows,  # TODO: set to 1 to speed up development
+        eda_report_html_path=config.eda_report_html_path,
+        features=config.features,
+        hyperparam_search_trials=config.hyperparam_search_trials,
+        model_name=config.model_name,
+        n_model_candidates=config.n_model_candidates,
+        max_percentage_diff_mae_wrt_baseline=config.max_percentage_diff_mae_wrt_baseline,
     )
