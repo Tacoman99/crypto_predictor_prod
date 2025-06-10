@@ -22,7 +22,13 @@ cd deployment/${env}
 # from the deployments/${env}/.env.local file
 eval "$(direnv export bash)"
 echo "KUBECONFIG=${KUBECONFIG}"
-# manually apply the deployment manifests
-kubectl delete -f yamls/${service}.yaml --ignore-not-found=true
-kubectl apply -f yamls/${service}.yaml
 
+
+# if there is a kustomization.yaml file, use kustomize to deploy the service
+if [ -f ${service}/kustomization.yaml ]; then
+    kustomize build ${service} | kubectl apply -f -
+else
+    # manually apply the deployment manifests
+    kubectl delete -f ${service}/${service}-d.yaml --ignore-not-found=true
+    kubectl apply -f ${service}/${service}-d.yaml
+fi

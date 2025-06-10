@@ -2,7 +2,7 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: backfill-technical-indicators
+  name: backfill-config
   namespace: historical
 data:
   # Quote them!!! - by Marius
