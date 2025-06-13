@@ -30,3 +30,4 @@ CREATE TABLE technical_indicators (
     topic='technical_indicators',
     properties.bootstrap.server='kafka-e11b-kafka-bootstrap.kafka.svc.cluster.local:9092'
 ) FORMAT PLAIN ENCODE JSON;
+

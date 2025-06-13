@@ -110,8 +110,9 @@ def run(
 
     # Step 2. Aggregate trades into candles
     # TODO: at the moment I am just printing it, to make sure this thing works.
-    # sdf = sdf.update(lambda message: logger.info(f'Input:  {message}'))
-
+    sdf = sdf.update(lambda message: logger.info(f'Input:  {message}'))
+    breakpoint()
+    
     # Aggregation of trades into candles using tumbling windows
     from datetime import timedelta
 
