@@ -1,53 +1,51 @@
-#
-# https://kubernetes.io/docs/concepts/workloads/controllers/job/
-#
 ---
 apiVersion: batch/v1
 kind: CronJob
 metadata:
-  name: technical-indicators-historical
+  name: trades-historical
   namespace: historical
+  labels:
+    app: trades-historical
 spec:
   schedule: "5 * * * *"  # Run every 5 minutes
   concurrencyPolicy: Forbid  # Don't start new job if previous one is still running
   successfulJobsHistoryLimit: 3  # Keep history of last 3 successful jobs
   failedJobsHistoryLimit: 1  # Keep history of last failed job
-
   jobTemplate:
     spec:
       backoffLimit: 4
       template:
+        metadata:
+          labels:
+            app: trades-historical
         spec:
           restartPolicy: OnFailure
           containers:
-          - name: technical-indicators
-            image: technical-indicators:dev
+          - name: trades-historical
+            image: trades:dev
             imagePullPolicy: Never # Use the local image
             env:
-            #
             - name: KAFKA_BROKER_ADDRESS
               valueFrom:
                 configMapKeyRef:
                   name: backfill-technical-indicators
                   key: KAFKA_BROKER_ADDRESS
-            #
-            - name: KAFKA_INPUT_TOPIC
+            - name: KAFKA_TOPIC_NAME
               valueFrom:
                 configMapKeyRef:
                   name: backfill-technical-indicators
-                  key: CANDLES_TOPIC
-            #
-            - name: KAFKA_OUTPUT_TOPIC
+                  key: TRADES_TOPIC
+            - name: LIVE_OR_HISTORICAL
+              value: "historical"
+            - name: LAST_N_DAYS
               valueFrom:
                 configMapKeyRef:
                   name: backfill-technical-indicators
-                  key: TECHNICAL_INDICATORS_TOPIC
-            #
-            - name: KAFKA_CONSUMER_GROUP
-              value: "technical_indicators_group"
-            #
-            - name: CANDLE_SECONDS
-              valueFrom:
-                configMapKeyRef:
-                  name: backfill-technical-indicators
-                  key: CANDLE_SECONDS
+                  key: LAST_N_DAYS
+            resources:
+              limits:
+                cpu: 1000m
+                memory: 512Mi
+              requests:
+                cpu: 100m
+                memory: 512Mi

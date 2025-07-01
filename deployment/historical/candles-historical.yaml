@@ -3,7 +3,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: candles-historical
-  namespace: rwml
+  namespace: historical
   labels:
     app: candles-historical
 spec:

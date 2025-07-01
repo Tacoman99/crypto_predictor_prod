@@ -1,18 +1,17 @@
-#
-# https://kubernetes.io/docs/concepts/workloads/controllers/job/
-#
 ---
 apiVersion: batch/v1
 kind: CronJob
 metadata:
-  name: technical-indicators-historical
+  name: candles-historical
   namespace: historical
+  labels:
+    app: candles-historical
 spec:
   schedule: "5 * * * *"  # Run every 5 minutes
   concurrencyPolicy: Forbid  # Don't start new job if previous one is still running
   successfulJobsHistoryLimit: 3  # Keep history of last 3 successful jobs
   failedJobsHistoryLimit: 1  # Keep history of last failed job
-
+  
   jobTemplate:
     spec:
       backoffLimit: 4
@@ -20,32 +19,27 @@ spec:
         spec:
           restartPolicy: OnFailure
           containers:
-          - name: technical-indicators
-            image: technical-indicators:dev
+          - name: candles-historical
+            image: candles:dev
             imagePullPolicy: Never # Use the local image
             env:
-            #
             - name: KAFKA_BROKER_ADDRESS
               valueFrom:
                 configMapKeyRef:
                   name: backfill-technical-indicators
                   key: KAFKA_BROKER_ADDRESS
-            #
             - name: KAFKA_INPUT_TOPIC
               valueFrom:
                 configMapKeyRef:
                   name: backfill-technical-indicators
-                  key: CANDLES_TOPIC
-            #
+                  key: TRADES_TOPIC
             - name: KAFKA_OUTPUT_TOPIC
               valueFrom:
                 configMapKeyRef:
                   name: backfill-technical-indicators
-                  key: TECHNICAL_INDICATORS_TOPIC
-            #
+                  key: CANDLES_TOPIC
             - name: KAFKA_CONSUMER_GROUP
-              value: "technical_indicators_group"
-            #
+              value: "candles_consumer_group"
             - name: CANDLE_SECONDS
               valueFrom:
                 configMapKeyRef:

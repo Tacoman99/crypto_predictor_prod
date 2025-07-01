@@ -35,7 +35,8 @@ def init_candle(trade: dict) -> dict:
         'low': trade['price'],
         'close': trade['price'],
         'volume': trade['quantity'],
-        # 'timestamp_ms': trade['timestamp_ms'],
+        'first_trade_timestamp_ms': trade['timestamp_ms'],
+        'last_trade_timestamp_ms': trade['timestamp_ms'],
         'pair': trade['product_id'],
     }
 
@@ -56,6 +57,7 @@ def update_candle(candle: dict, trade: dict) -> dict:
     candle['low'] = min(candle['low'], trade['price'])
     candle['close'] = trade['price']
     candle['volume'] += trade['quantity']
+    candle['last_trade_timestamp_ms'] = trade['timestamp_ms']
 
     return candle
 
@@ -132,7 +134,8 @@ def run(
     sdf['low'] = sdf['value']['low']
     sdf['close'] = sdf['value']['close']
     sdf['volume'] = sdf['value']['volume']
-    # sdf['timestamp_ms'] = sdf['value']['timestamp_ms']
+    sdf['first_trade_timestamp_ms'] = sdf['value']['first_trade_timestamp_ms']
+    sdf['last_trade_timestamp_ms'] = sdf['value']['last_trade_timestamp_ms']
     sdf['pair'] = sdf['value']['pair']
 
     # Extract window start and end timestamps
